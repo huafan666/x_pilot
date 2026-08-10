@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 
+# 头文件检索路径
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
 # 设置项目名称
 project(x_pilot)
 

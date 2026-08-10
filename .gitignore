@@ -2,3 +2,6 @@ readme.md
 prd.md
 bin/
 build/
+log/
+include/
+config/
