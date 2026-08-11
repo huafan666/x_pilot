@@ -10,6 +10,9 @@
 
 using json = nlohmann::json;
 
+// 管道文件
+#define PIPE_NAME "/tmp/x_pilot_pipe" // <--- 必须有：和 Manager 一致的名字
+
 // 日志风险等级
 enum class LogLevel {
     INFO,          // 普通
@@ -102,10 +105,22 @@ public:
     double currentAltitude = 0.0; // 当前高度
     FlightState currentState = FlightState::CLIMBING;
 
+    // 定义一个管道输出流
+    std::ofstream dataPipe;
+
     // 无限循环的飞控程序，防止退出
     void runMission(double target) {
         logMessage(LogLevel::INFO, "任务开始，目标高度：" + std::to_string(target) + "米");
 
+        // 打开管道
+        dataPipe.open(PIPE_NAME);
+        if (!dataPipe.is_open()) {
+            logMessage(LogLevel::ERROR, "无法连接到管道");
+        } else {
+            logMessage(LogLevel::INFO, "数据链路已建立");
+        }
+
+        // 循环执行高度判断和飞行逻辑
         while (true) {
             if (currentState == FlightState::CLIMBING) {
                 performClimb(target);
@@ -125,6 +140,7 @@ private:
         if (currentAltitude < target) {
             currentAltitude += 10.0;
             logMessage(LogLevel::INFO, "正在爬升…… 当前高度为：" + std::to_string(currentAltitude) + "米");
+            sendTelemetry();
         }
         else {
             currentState = FlightState::CRUISING;
@@ -135,6 +151,15 @@ private:
     // 动作2：巡航
     void performCruise() {
         logMessage(LogLevel::INFO, "巡航中…… 系统正常，高度为：" + std::to_string(currentAltitude) + "米");
+    }
+
+    // 发送到管道的数据
+    void sendTelemetry() {
+        if (dataPipe.is_open()) {
+            std::string msg = "ALT:" + std::to_string(currentAltitude);
+            // 写入管道，并加换行
+            dataPipe << msg << std::endl;
+        }
     }
 };
 

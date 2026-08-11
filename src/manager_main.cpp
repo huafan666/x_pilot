@@ -3,6 +3,7 @@
 #include <string>      // 字符串类
 #include <unistd.h>    // Unix标准库
 #include <sys/wait.h>  // 进程状态定义
+#include <sys/stat.h>  // 创建管道
 
 // 定义结构体来储存子进程信息
 struct ProcessInfo {
@@ -10,9 +11,24 @@ struct ProcessInfo {
     std::string name;
 };
 
+// 定义管道名字和位置
+#define PIPE_NAME "/tmp/x_pilot_pipe"
+
 int main() {
     std::cout << "x_pilot 管理程序运行" << std::endl;
 
+    // 如果管道创建失败
+    if (mkfifo(PIPE_NAME, 0666) == -1) {
+        if (errno != EEXIST) {
+            perror("管道创建失败");
+            return 1;
+        }
+    }
+
+    // 如果管道创建成功
+    std::cout << "[Manager] 管道准备就绪: " << PIPE_NAME << std::endl;
+
+    // 创建结构体放置进程说明
     std::vector<ProcessInfo> children;
 
     // 开启子进程(通信进程)
