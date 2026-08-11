@@ -31,9 +31,9 @@ struct FlightConfig {
 FlightConfig loadConfig() {
     FlightConfig config;
 
-    std::ifstream configFile("config/config.json");
+    std::ifstream configFile("config/config_plane.json");
     if (!configFile.is_open()) {
-        LOG_ERROR("无法打开 config/config.json");
+        LOG_ERROR("无法打开 config/config_plane.json");
         return config;
     }   
 
