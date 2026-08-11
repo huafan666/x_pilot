@@ -13,10 +13,10 @@ set(CMAKE_CXX_STANDARD 11)
 # 语法：add_executable(生成可执行的文件 源代码文件路径)
 
 # 守护进程
-add_executable(manager src/manager_main.cpp)
+add_executable(manager src/manager_main.cpp src/utils.cpp)
 
 # 通信进程
-add_executable(comm_process src/comm_main.cpp)
+add_executable(comm_process src/comm_main.cpp src/utils.cpp)
 
 # 控制进程
-add_executable(control_process src/control_main.cpp)
+add_executable(control_process src/control_main.cpp src/utils.cpp)

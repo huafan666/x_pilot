@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <thread>
 #include <chrono>
+#include <utils.h> // 日志头文件
 
 // 定义管道名称
 #define PIPE_NAME "/tmp/x_pilot_pipe"

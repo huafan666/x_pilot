@@ -4,6 +4,7 @@
 #include <unistd.h>    // Unix标准库
 #include <sys/wait.h>  // 进程状态定义
 #include <sys/stat.h>  // 创建管道
+#include <utils.h>     // 日志头文件
 
 // 定义结构体来储存子进程信息
 struct ProcessInfo {
@@ -72,11 +73,13 @@ int main() {
             }
 
             std::cout << "检测到进程 " << dead_name << "PID: " << result << "意外退出" << std::endl;
+            logMessage(LogLevel::ERROR, "检测到进程挂掉, 尝试重启...");
 
             // 重启挂掉的进程
             if (!dead_path.empty()) {
                 start_process(dead_name, dead_path);
             }
+            logMessage(LogLevel::INFO, "进程重启成功!");
         } 
 
         sleep(1);
