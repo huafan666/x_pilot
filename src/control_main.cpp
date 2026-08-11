@@ -11,10 +11,18 @@
 #include <types.h>      // 数据类型
 #include <sys/mman.h>   // linux内存管理接口
 #include <fcntl.h>      // 控制文件
-#include <unistd.h>     // 
-
+#include <unistd.h>     
+#include <csignal>      // 信号
 
 using json = nlohmann::json;
+
+// 定义全局退出的标记
+volatile sig_atomic_t g_should_exit = 0;
+
+// 信号处理函数：收到信号后，将 g_should_exit 设为 0，让循环停止
+void control_signal_handler(int signum) {
+    g_should_exit = 1;
+}
 
 // 管道文件
 #define PIPE_NAME "/tmp/x_pilot_pipe" // <--- 必须有：和 Manager 一致的名字
@@ -110,7 +118,7 @@ public:
         }
 
         // 循环执行高度判断和飞行逻辑
-        while (true) {
+        while (!g_should_exit) {
             if (currentState == FlightState::CLIMBING) {
                 performClimb(target);
             }
@@ -164,6 +172,10 @@ private:
 // main
 int main() {
     LOG_INFO("系统初始化……");
+
+    // 注册信号处理函数，捕获 Manager 发来的 SIGTERM 和 Ctrl+C 的 SIGINT
+    signal(SIGTERM, control_signal_handler);
+    signal(SIGINT, control_signal_handler);
     
     // 加载配置文件
     FlightConfig myConfig = loadConfig();
