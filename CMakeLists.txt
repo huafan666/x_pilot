@@ -20,3 +20,6 @@ add_executable(comm_process src/comm_main.cpp src/utils.cpp)
 
 # 控制进程
 add_executable(control_process src/control_main.cpp src/utils.cpp)
+
+# 数据可视进程
+add_executable(view_process src/view_main.cpp src/utils.cpp)
