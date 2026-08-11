@@ -38,6 +38,9 @@ Config ConfigLoader::load(const std::string& filepath) {
         if (j.contains("control_process_path")) cfg.control_process_path = j["control_process_path"];
         else LOG_WARN("缺少字段 control_process_path");
         
+        if (j.contains("view_process_path")) cfg.view_process_path = j["view_process_path"];
+        else LOG_WARN("缺少字段 view_process_path");
+        
         if (j.contains("log_level")) cfg.log_level = j["log_level"];
         else LOG_WARN("缺少字段 log_level");
         

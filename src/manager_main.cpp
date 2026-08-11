@@ -5,6 +5,7 @@
 #include <sys/wait.h>  // 进程状态定义
 #include <sys/stat.h>  // 创建管道
 #include <utils.h>     // 日志头文件
+#include <config.h>    // 配置头文件
 
 // 定义结构体来储存子进程信息
 struct ProcessInfo {
@@ -17,6 +18,10 @@ struct ProcessInfo {
 #define PIPE_NAME "/tmp/x_pilot_pipe"
 
 int main() {
+    // 读取配置信息
+    Config cfg = ConfigLoader::load("config/config.json");
+
+    // 程序开始运行提示
     std::cout << "x_pilot 管理程序运行" << std::endl;
 
     // 如果管道创建失败
@@ -46,8 +51,12 @@ int main() {
     };
 
     // 启动两个子进程(通信和控制)
-    start_process("comm_process", "./build/comm_process");
-    start_process("control_process", "./build/control_process");
+    start_process("comm_process", cfg.comm_process_path);
+    start_process("control_process", cfg.control_process_path);
+
+    if (!cfg.view_process_path.empty()) {
+        start_process("view_process", cfg.view_process_path);
+    }
 
     std::cout << "[Manager] 所有进程已启动，开始监控..." << std::endl;
 
