@@ -18,7 +18,7 @@ int main() {
     // 如果失败
     if (shm_fd == -1) {
         std::cerr << "无法打开内存" << std::endl;
-        logMessage(LogLevel::ERROR, "无法打开内存, 无法可视化");
+        LOG_ERROR("无法打开内存, 无法可视化");
         return 1;
     }
 
@@ -31,14 +31,14 @@ int main() {
     // 检查是否映射成功
     if (shm_ptr == MAP_FAILED) {
         std::cerr << "内存映射失败" << std::endl;
-        logMessage(LogLevel::ERROR, "内存映射失败");
+        LOG_ERROR("内存映射失败");
         close(shm_fd);
         return 1;
     }
 
     // 映射成功
     std::cout << "内存映射成功" << std::endl;
-    logMessage(LogLevel::INFO, "内存映射成功");
+    LOG_INFO("内存映射成功");
 
     // 读取数据
     while (true) {

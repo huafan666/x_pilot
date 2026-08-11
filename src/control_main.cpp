@@ -33,7 +33,7 @@ FlightConfig loadConfig() {
 
     std::ifstream configFile("config/config.json");
     if (!configFile.is_open()) {
-        logMessage(LogLevel::ERROR, "无法打开 config/config.json");
+        LOG_ERROR("无法打开 config/config.json");
         return config;
     }   
 
@@ -45,9 +45,9 @@ FlightConfig loadConfig() {
         config.latitude = j.value("经度", 0.0);
         config.longitude = j.value("纬度", 0.0);
 
-        logMessage(LogLevel::INFO, "配置文件加载成功");
+        LOG_INFO("配置文件加载成功");
     } catch (const std::exception& e) {
-        logMessage(LogLevel::ERROR, "JSON 解析失败：" + std::string(e.what()));
+        LOG_ERROR("JSON 解析失败：" + std::string(e.what()));
     }
 
     return config;
@@ -78,14 +78,14 @@ public:
 
     // 无限循环的飞控程序，防止退出
     void runMission(double target) {
-        logMessage(LogLevel::INFO, "任务开始，目标高度：" + std::to_string(target) + "米");
+        LOG_INFO("任务开始，目标高度：" + std::to_string(target) + "米");
 
         const char* shm_name = "/x_pilot_shm";
 
         // 打开共享内存, 准备读取内容
         shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
         if (shm_fd == -1) {
-            logMessage(LogLevel::ERROR, "共享内存创建失败");
+            LOG_ERROR("共享内存创建失败");
             return;
         }
 
@@ -95,18 +95,18 @@ public:
         // 映射到内存中
         shm_ptr = (x_pilot::RobotState*)mmap(NULL, sizeof(x_pilot::RobotState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
         if (shm_ptr == MAP_FAILED) {
-            logMessage(LogLevel::ERROR, "共享内存映射失败");
+            LOG_ERROR("共享内存映射失败");
             close(shm_fd);
             return;
         }
-        logMessage(LogLevel::INFO, "共享内存挂载成功");
+        LOG_INFO("共享内存挂载成功");
 
         // 打开管道
         dataPipe.open(PIPE_NAME);
         if (!dataPipe.is_open()) {
-            logMessage(LogLevel::ERROR, "无法连接到管道");
+            LOG_ERROR("无法连接到管道");
         } else {
-            logMessage(LogLevel::INFO, "数据链路已建立");
+            LOG_INFO("数据链路已建立");
         }
 
         // 循环执行高度判断和飞行逻辑
@@ -132,23 +132,23 @@ private:
             // 高度currentAltitude赋值给结构体的z
             if (shm_ptr != nullptr) {
                 shm_ptr->z = currentAltitude;
-                logMessage(LogLevel::INFO, "赋值成功, 高度给z值");
+                LOG_INFO("赋值成功, 高度给z值");
             } else {
-                logMessage(LogLevel::ERROR, "赋值失败, 未知原因");
+                LOG_ERROR("赋值失败, 未知原因");
             }
 
-            logMessage(LogLevel::INFO, "正在爬升…… 当前高度为：" + std::to_string(currentAltitude) + "米");
+            LOG_INFO("正在爬升…… 当前高度为：" + std::to_string(currentAltitude) + "米");
             sendTelemetry();
         }
         else {
             currentState = FlightState::CRUISING;
-            logMessage(LogLevel::INFO, "到达目标高度，切换巡航模式");
+            LOG_INFO("到达目标高度，切换巡航模式");
         }
     }
 
     // 动作2：巡航
     void performCruise() {
-        logMessage(LogLevel::INFO, "巡航中…… 系统正常，高度为：" + std::to_string(currentAltitude) + "米");
+        LOG_INFO("巡航中…… 系统正常，高度为：" + std::to_string(currentAltitude) + "米");
     }
 
     // 发送到管道的数据
@@ -163,7 +163,7 @@ private:
 
 // main
 int main() {
-    logMessage(LogLevel::INFO, "系统初始化……");
+    LOG_INFO("系统初始化……");
     
     // 加载配置文件
     FlightConfig myConfig = loadConfig();

@@ -73,13 +73,13 @@ int main() {
             }
 
             std::cout << "检测到进程 " << dead_name << "PID: " << result << "意外退出" << std::endl;
-            logMessage(LogLevel::ERROR, "检测到进程挂掉, 尝试重启...");
+            LOG_ERROR("检测到进程挂掉, 尝试重启...");
 
             // 重启挂掉的进程
             if (!dead_path.empty()) {
                 start_process(dead_name, dead_path);
             }
-            logMessage(LogLevel::INFO, "进程重启成功!");
+            LOG_INFO("进程重启成功!");
         } 
 
         sleep(1);
