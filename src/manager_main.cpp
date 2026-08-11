@@ -9,6 +9,7 @@
 struct ProcessInfo {
     pid_t pid;
     std::string name;
+    std::string path;
 };
 
 // 定义管道名字和位置
@@ -31,34 +32,54 @@ int main() {
     // 创建结构体放置进程说明
     std::vector<ProcessInfo> children;
 
-    // 开启子进程(通信进程)
-    pid_t pid_comm = fork();
-    if (pid_comm == 0) {
-        // 启动通信进程
-        execlp("./build/comm_process", "./build/comm_process", NULL);
-        // 如果到这里则失败
-        perror("通信进程启动失败");
-        exit(0);
-    } else if (pid_comm > 0) {
-        children.push_back(ProcessInfo{pid_comm, "comm_process"});
-        std::cout << "[Manager] 已经启动了通信进程, PID: " << pid_comm << std::endl;
-    }
+    auto start_process = [&](const std::string& name, const std::string& path) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execlp(path.c_str(), path.c_str(), NULL);
+            perror("进程启动失败");
+            exit(1);
+        } else if (pid > 0) {
+            children.push_back({pid, name, path});
+            std::cout << "[Manager] 启动进程: " << name << " (PID: " << pid << ")" << std::endl;
+        }
+    };
 
-    pid_t pid_ctrl = fork();
-    if (pid_ctrl == 0) {
-        // 启动通信进程
-        execlp("./build/control_process", "./build/control_process", NULL);
-        // 如果到这里则失败
-        perror("通信进程启动失败");
-        exit(0);
-    } else if (pid_ctrl > 0) {
-        children.push_back(ProcessInfo{pid_ctrl, "control_process"});
-        std::cout << "[Manager] 已经启动了控制进程, PID: " << pid_ctrl << std::endl;
-    }
+    // 启动两个子进程(通信和控制)
+    start_process("comm_process", "./build/comm_process");
+    start_process("control_process", "./build/control_process");
 
-    std::cout << "[Manager] 所有进程已经启动..." << std::endl;
+    std::cout << "[Manager] 所有进程已启动，开始监控..." << std::endl;
+
+    // 监控循环, 保证进程挂掉之后重启
     while (true) {
-        sleep(10);
+        int status;
+
+        pid_t result = waitpid(-1, &status, WNOHANG);
+
+        if (result > 0) {
+            // 说明有进程挂了
+            std::string dead_name = "Unknown";
+            std::string dead_path = "";
+
+            // 寻找是谁并且移除掉
+            for (auto it = children.begin(); it != children.end(); ++it) {
+                if (it->pid == result) {
+                    dead_name = it->name;
+                    dead_path = it->path;
+                    children.erase(it);
+                    break;
+                }
+            }
+
+            std::cout << "检测到进程 " << dead_name << "PID: " << result << "意外退出" << std::endl;
+
+            // 重启挂掉的进程
+            if (!dead_path.empty()) {
+                start_process(dead_name, dead_path);
+            }
+        } 
+
+        sleep(1);
     }
 
     return 0;
