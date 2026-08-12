@@ -41,3 +41,10 @@ add_executable(view_process
     src/utils.cpp
     src/config.cpp   
 )
+
+# 5. 测试客户端
+add_executable(ipc_test_client
+    test/ipc_test_client.cpp
+    src/ipc.cpp
+    src/utils.cpp
+)

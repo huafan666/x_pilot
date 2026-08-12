@@ -93,6 +93,7 @@ public:
 
     // 无限循环的飞控程序，防止退出
     void runMission(double target, double speed, const std::string& shm_path) {
+        // 打印目标
         LOG_INFO("任务开始，目标高度：" + std::to_string(target) + "米");
 
         // 共享内存初始化c
@@ -114,72 +115,132 @@ public:
         // 初始化共享内存数据
         shm_ptr->speed = speed;
 
-        // 启动IPC服务端
+        // IPC服务启动
         if (!server.bindAndListen("/tmp/x_pilot.ipc")) {
             LOG_ERROR("IPC 服务端启动失败");
-        } else {
-            LOG_INFO("IPC 服务端已启动，等待连接...");
-            
-            while (!g_should_exit) {
-                fd_set read_fds;
-                FD_ZERO(&read_fds);
-                FD_SET(server.m_server_fd, &read_fds);
+            return; // 启动失败直接退出
+        }
+        LOG_INFO("IPC 服务端已启动，等待连接...");
 
-                struct timeval timeout;
-                timeout.tv_sec = 1;
-                timeout.tv_usec = 0;
+        // 循环等待客户端连接
+        while (!g_should_exit) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(server.m_server_fd, &read_fds);
+            struct timeval timeout {1, 0}; // 1秒超时
 
-                int ret = select(server.m_server_fd + 1, &read_fds, NULL, NULL, &timeout);
-
-                if (ret > 0) {
-                    if (FD_ISSET(server.m_server_fd, &read_fds)) {
-                        client_fd = server.accept();
-                        if (client_fd > 0) {
-                            LOG_INFO("IPC 客户端已连接");
-                            break; // 连接成功，跳出等待循环，进入业务循环
-                        }
+            int ret = select(server.m_server_fd + 1, &read_fds, NULL, NULL, &timeout);
+            if (ret > 0) {
+                if (FD_ISSET(server.m_server_fd, &read_fds)) {
+                    client_fd = server.accept();
+                    if (client_fd > 0) {
+                        LOG_INFO("IPC 客户端已连接");
+                        break; // 连接成功才跳出
                     }
-                } else if (ret == 0) {
-                    continue;
-                } else {
-                    LOG_ERROR("Select 监听异常");
-                    break;
                 }
+            } else if (ret < 0) {
+                LOG_ERROR("Select 监听异常");
+                return;
             }
         }
 
-        // 计数器用于电量计算
-        int loop_counter = 0;
+        // 多线程设置
+        auto simulation_loop = [&]() {
+            LOG_INFO("飞控仿真线程启动");
+            int loop_counter = 0;
 
-        // 循环执行高度判断和飞行逻辑
+            while (!g_should_exit) {
+                if (currentState == FlightState::CLIMBING) {
+                    performClimb(target);
+                } else if (currentState == FlightState::CRUISING) {
+                    performCruise();
+                }
+
+                // 更新共享内存时间戳
+                // 更新共享内存时间戳
+                if (shm_ptr != nullptr) {
+                    shm_ptr->timestamp = getTimestamp();
+
+                    if (currentState == FlightState::CRUISING) {
+                        // 注意：这里读取 speed，主线程可能会改 speed，但 double 读写通常是原子的，不影响大致逻辑
+                        shm_ptr->x += shm_ptr->speed * 0.1;
+
+                        if (shm_ptr->is_spraying) {
+                            shm_ptr->sprayed_amount += shm_ptr->speed * 0.1;
+                        }
+                    }
+
+                    loop_counter++;
+                    if (loop_counter >= 10) {
+                        loop_counter = 0;
+                        if (shm_ptr->battary > 0) shm_ptr->battary -= 0.1;
+                    }
+
+                    LOG_INFO("[数据监控] 速度: " + std::to_string(shm_ptr->speed) + " | 喷洒: " + (shm_ptr->is_spraying ? "开" : "关"));
+                }
+
+                // 仿真逻辑结束
+                std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+            }
+        };
+
+        // 启动线程
+        std::thread sim_thread(simulation_loop);
+
+        LOG_INFO("主线程进入 IPC 指令监听模式");
         while (!g_should_exit) {
-            if (currentState == FlightState::CLIMBING) {
-                performClimb(target);
-            }
-            else if (currentState == FlightState::CRUISING) {
-                performCruise();
-            }
-
-            shm_ptr->timestamp = getTimestamp();
-
-            if (currentState == FlightState::CRUISING) {
-                shm_ptr->x += shm_ptr->speed * 0.1;
-
-                if (shm_ptr->is_spraying) {
-                    shm_ptr->sprayed_amount += shm_ptr->speed * 0.1;
+            if (client_fd > 0) {
+                fd_set read_fds;
+                FD_ZERO(&read_fds);
+                FD_SET(client_fd, &read_fds);
+                struct timeval timeout {1, 0};
+                
+                if (select(client_fd + 1, &read_fds, NULL, NULL, &timeout) > 0) {
+                    if (FD_ISSET(client_fd, &read_fds)) {
+                        json recv_j;
+                        if (server.recvFrame(client_fd, recv_j)) {
+                            handleCommand(recv_j);
+                        } else {
+                            LOG_WARN("客户端断开");
+                            close(client_fd);
+                            client_fd = -1;
+                        }
+                    }
                 }
+            } else {
+                // 如果没有客户端连接，稍微睡一下避免 CPU 空转
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
+        }
 
-            loop_counter++;
-            if (loop_counter >= 10) {
-                loop_counter = 0;
-                if (shm_ptr->battary > 0) {
-                    shm_ptr->battary -= 0.1;
-                }
+        // --- 6. 安全退出 ---
+        if (sim_thread.joinable()) {
+            sim_thread.join();
+        }
+        LOG_INFO("系统已安全退出");
+    }
+
+    // 处理接受客户端json指令
+    void handleCommand(const json& cmd_json) {
+        if (!cmd_json.contains("cmd")) {
+            LOG_WARN("收到无效指令, 缺少cmd字段");
+            return;
+        }
+
+        std::string cmd = cmd_json["cmd"];
+
+        if (cmd == "SET_SPEED") {
+            // 解析 params 中的 speed
+            if (cmd_json.contains("params") && cmd_json["params"].contains("speed")) {
+                double new_speed = cmd_json["params"]["speed"];
+                shm_ptr->speed = new_speed; // 修改共享内存
+                LOG_INFO("指令执行：速度设置为 " + std::to_string(new_speed));
             }
-
-            // 休息时间，防止频率过高
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else if (cmd == "START_SPRAY") {
+            shm_ptr->is_spraying = true; // 开始喷洒
+            LOG_INFO("指令执行：开始喷洒");
+        } else {
+            LOG_WARN("收到未知指令：" + cmd);
         }
     }
 
