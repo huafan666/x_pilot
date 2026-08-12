@@ -52,6 +52,7 @@ FlightConfig loadConfig() {
         config.altitude = j.value("巡航高度", 0.0);
         config.latitude = j.value("经度", 0.0);
         config.longitude = j.value("纬度", 0.0);
+        config.speed       = j.value("巡航速度", 0.0); 
 
         LOG_INFO("配置文件加载成功");
     } catch (const std::exception& e) {
@@ -111,6 +112,9 @@ public:
             return;
         }
         LOG_INFO("共享内存挂载成功: " + shm_path);
+
+        // 清零
+        memset(shm_ptr, 0, sizeof(x_pilot::RobotState));
 
         // 初始化共享内存数据
         shm_ptr->speed = speed;
@@ -180,7 +184,7 @@ public:
                 }
 
                 // 仿真逻辑结束
-                std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
         };
 

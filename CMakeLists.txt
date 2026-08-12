@@ -10,23 +10,22 @@ set(CMAKE_CXX_STANDARD 14)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # 1. 守护进程
-# 需要加载配置，所以加上了 config.cpp
 add_executable(manager 
     src/manager_main.cpp 
     src/utils.cpp
     src/config.cpp      
 )
 
-# 2. 通信进程
-# 需要读取 IP/端口/心跳配置，所以加上 config.cpp
+# 2. 通信进程 (重要修改：增加了 tcp_client.cpp 和 ipc.cpp)
 add_executable(comm_process 
     src/comm_main.cpp 
     src/utils.cpp
-    src/config.cpp      
+    src/config.cpp
+    src/ipc.cpp           # 新增：Comm 需要连接 IPC
+    src/tcp_client.cpp    # 新增：Comm 需要连接 TCP
 )
 
 # 3. 控制进程
-# 需要读取共享内存路径等配置，所以加上 config.cpp
 add_executable(control_process 
     src/control_main.cpp 
     src/utils.cpp
@@ -35,7 +34,6 @@ add_executable(control_process
 )
 
 # 4. 数据可视进程
-# 如果它也需要读配置，就加上；如果只是纯查看共享内存，可以不加。建议先加上。
 add_executable(view_process 
     src/view_main.cpp 
     src/utils.cpp

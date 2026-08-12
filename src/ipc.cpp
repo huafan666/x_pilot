@@ -88,7 +88,7 @@ bool UnixSocketServer::sendFrame(int client_fd, const json& j) {
 
     // 如果发送头成功，则发送json实体
     sent = ::send(client_fd, body.c_str(), body.length(), 0);
-    if (sent != (ssize_t)len) {
+    if (sent != (ssize_t)body.length()) {
         LOG_ERROR("发送帧体失败");
         return false;
     }
