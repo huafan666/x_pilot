@@ -9,13 +9,15 @@
 #include <csignal>     // 信号处理
 #include <chrono>      // 时间库
 #include <thread>      // 线程休眠
-
+#include <ctime>       // 计时
 
 // 定义结构体来储存子进程信息
 struct ProcessInfo {
     pid_t pid;
     std::string name;
     std::string path;
+    int restart_count = 0;          // 记录重启次数
+    time_t last_restart_time = 0;   // 记录上次重启的时间点
 };
 
 // 定义管道名字和位置
@@ -54,24 +56,34 @@ int main() {
     // 创建结构体放置进程说明
     std::vector<ProcessInfo> children;
 
-    auto start_process = [&](const std::string& name, const std::string& path) {
+    auto start_process = [&](ProcessInfo& info) {
         pid_t pid = fork();
         if (pid == 0) {
-            execlp(path.c_str(), path.c_str(), NULL);
+            execlp(info.path.c_str(), info.path.c_str(), NULL);
             perror("进程启动失败");
             exit(1);
         } else if (pid > 0) {
-            children.push_back({pid, name, path});
-            std::cout << "[Manager] 启动进程: " << name << " (PID: " << pid << ")" << std::endl;
+            info.pid = pid;
+            children.push_back(info);
+            std::cout << "[Manager] 启动进程: " << info.name 
+                      << " (PID: " << info.pid << ", Restart Count: " 
+                      << info.restart_count << ")" << std::endl;
+        } else {
+            // 【父进程】fork 失败（新增这部分）
+            perror("[Manager] fork 失败");
         }
     };
 
     // 启动两个子进程(通信和控制)
-    start_process("comm_process", cfg.comm_process_path);
-    start_process("control_process", cfg.control_process_path);
+    ProcessInfo comm_info = {0, "comm_process", cfg.comm_process_path, 0, 0};
+    start_process(comm_info);
+
+    ProcessInfo control_info = {0, "control_process", cfg.control_process_path, 0, 0};
+    start_process(control_info);
 
     if (!cfg.view_process_path.empty()) {
-        start_process("view_process", cfg.view_process_path);
+        ProcessInfo view_info = {0, "view_process", cfg.view_process_path, 0, 0};
+        start_process(view_info);
     }
 
     std::cout << "[Manager] 所有进程已启动，开始监控..." << std::endl;
@@ -82,29 +94,43 @@ int main() {
 
         pid_t result = waitpid(-1, &status, WNOHANG);
 
+        // 说明有进程挂了
         if (result > 0) {
-            // 说明有进程挂了
-            std::string dead_name = "Unknown";
-            std::string dead_path = "";
+            // 保存挂掉的进程信息
+            ProcessInfo dead_info;
+            bool found = false;
 
             // 寻找是谁并且移除掉
             for (auto it = children.begin(); it != children.end(); ++it) {
                 if (it->pid == result) {
-                    dead_name = it->name;
-                    dead_path = it->path;
+                    dead_info = *it;
                     children.erase(it);
+                    found = true;
                     break;
                 }
             }
 
-            std::cout << "检测到进程 " << dead_name << "PID: " << result << "意外退出" << std::endl;
-            LOG_ERROR("检测到进程挂掉, 尝试重启...");
-
             // 重启挂掉的进程
-            if (!dead_path.empty()) {
-                start_process(dead_name, dead_path);
+            if (found) {
+                std::cout << "检测到进程 " << dead_info.name << "PID: " << result << "意外退出" << std::endl;
+                LOG_ERROR("检测到进程挂掉, 尝试重启...");
+
+                time_t now = time(nullptr);
+                if ((now - dead_info.last_restart_time) < 10 && dead_info.restart_count >= 3) {
+                    std::cout << "[Manager] 频繁崩溃！停止重启 " << dead_info.name << std::endl;
+                    LOG_ERROR("频繁崩溃，停止重启该进程");
+                } else {
+                    dead_info.last_restart_time = now;
+                    dead_info.restart_count++;
+                    
+                    // 等待3秒再重启
+                    sleep(3);
+
+                    // 重启子进程
+                    start_process(dead_info);
+                    LOG_INFO("进程重启成功");
+                }
             }
-            LOG_INFO("进程重启成功!");
         } 
 
         sleep(1);
@@ -126,7 +152,7 @@ int main() {
         }
     }
 
-    // 等待 3 秒，给子进程留出清理时间
+    // 等待 5 秒，给子进程留出清理时间
     std::cout << "[Manager] 等待子进程退出 (5秒)..." << std::endl;
     // 使用 C++11 的 sleep_for
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
