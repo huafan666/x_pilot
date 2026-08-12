@@ -10,7 +10,12 @@
 
 #define FRAME_HEADER_LEN 4
 
-TcpClient::TcpClient() : m_sock_fd(-1), m_port(0), m_state(TcpState::DISCONNECTED), m_backoff_seconds(1), m_last_attempt_time(0) {}
+// 初始化tcp相关变量
+TcpClient::TcpClient() 
+    : m_sock_fd(-1), m_port(0), m_state(TcpState::DISCONNECTED)
+    , m_backoff_seconds(1), m_last_attempt_time(0)
+    , m_heartbeat_interval(1), m_heartbeat_timeout(5)
+    , m_last_send_time(0), m_last_recv_time(0) {}
 
 TcpClient::~TcpClient() {
     close();
@@ -125,6 +130,58 @@ void TcpClient::checkConnectionResult() {
     }
 }
 
+// 发送心跳包
+void TcpClient::sendHeartbeat() {
+    // 只有已连接状态才发
+    if (m_state != TcpState::CONNECTED || m_sock_fd == -1) return;
+
+    time_t now = time(nullptr);
+
+    // 距离上次发心跳不到 1 秒，不发
+    if (now - m_last_send_time < m_heartbeat_interval) return;
+
+    // 构造心跳 JSON（PRD 5.2.1 格式）
+    json heartbeat;
+    heartbeat["type"] = "heartbeat";
+    heartbeat["timestamp"] = (long long)now;
+
+    // 复用已有的 send 方法发送
+    if (!send(heartbeat)) {
+        LOG_WARN("心跳发送失败");
+        // send 内部失败会调用 onDisconnected，这里不用再处理
+        return;
+    }
+
+    m_last_send_time = now;
+    LOG_DEBUG("心跳已发送");
+}
+
+// 检查心跳是否超时（主循环每次循环调用）
+void TcpClient::checkHeartbeatTimeout() {
+    // 只有已连接状态才检查
+    if (m_state != TcpState::CONNECTED) return;
+
+    time_t now = time(nullptr);
+
+    // 如果从来没收到过数据（m_last_recv_time == 0）
+    // 就从连接成功那一刻开始算超时
+    if (m_last_recv_time == 0) {
+        m_last_recv_time = m_last_send_time; // 退而求其次，用发送时间
+    }
+
+    // 距离上次收到数据超过 5 秒 → 判定断线
+    if (now - m_last_recv_time >= m_heartbeat_timeout) {
+        LOG_WARN("心跳超时，服务器 " + m_ip + ":" + std::to_string(m_port) + " 无响应，判定断线");
+        onDisconnected();  // 复用已有的断线处理（会触发重连）
+    }
+}
+
+// 收到服务器任何数据时调用，重置超时计时器
+void TcpClient::onDataReceived() {
+    m_last_recv_time = time(nullptr);
+    LOG_DEBUG("收到数据，重置心跳计时器");
+}
+
 void TcpClient::onDisconnected() {
     if (m_state != TcpState::DISCONNECTED) {
         LOG_WARN("TCP: 连接断开");
@@ -138,6 +195,11 @@ void TcpClient::close() {
         m_sock_fd = -1;
     }
     m_state = TcpState::DISCONNECTED;
+}
+
+void TcpClient::resetHeartbeatTimer() {
+    m_last_send_time = time(nullptr);
+    m_last_recv_time = time(nullptr);
 }
 
 bool TcpClient::send(const json& j) {

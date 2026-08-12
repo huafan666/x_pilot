@@ -85,6 +85,10 @@ int main() {
             }
         }
 
+        // B2. 心跳逻辑：发送心跳 + 检查超时
+        tcp_client.sendHeartbeat();
+        tcp_client.checkHeartbeatTimeout();
+
         // C. 等待事件 (超时 1秒，以便循环回来检查重连)
         int timeout_ms = 1000; 
         int nfds = epoll_wait(epoll_fd, events, 10, timeout_ms);
@@ -111,6 +115,8 @@ int main() {
                             ev.events = EPOLLIN;
                             ev.data.fd = fd;
                             epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+                            // 初始化心跳计时器
+                            tcp_client.resetHeartbeatTimer();
                         }
                     }
                 }
@@ -119,6 +125,8 @@ int main() {
                 if (events[i].events & EPOLLIN) {
                     json j;
                     if (tcp_client.recv(j)) {
+                        // 重置心跳计时器
+                        tcp_client.onDataReceived();
                         // 收到地面站指令 -> 转发给 Control
                         // 注意：这里如果 IPC 断开，发送会失败，我们在循环里会自动重连 IPC
                         if (ipc_client.m_sock_fd != -1) {
