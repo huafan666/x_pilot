@@ -30,7 +30,8 @@ add_executable(comm_process
 add_executable(control_process 
     src/control_main.cpp 
     src/utils.cpp
-    src/config.cpp      
+    src/config.cpp
+    src/ipc.cpp      
 )
 
 # 4. 数据可视进程

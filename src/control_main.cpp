@@ -13,6 +13,7 @@
 #include <fcntl.h>      // 控制文件
 #include <unistd.h>     
 #include <csignal>      // 信号
+#include <ipc.h>        // IPC模块，通信
 
 using json = nlohmann::json;
 
@@ -23,9 +24,6 @@ volatile sig_atomic_t g_should_exit = 0;
 void control_signal_handler(int signum) {
     g_should_exit = 1;
 }
-
-// 管道文件
-#define PIPE_NAME "/tmp/x_pilot_pipe" // <--- 必须有：和 Manager 一致的名字
 
 // 存放无人机配置文件
 struct FlightConfig {
@@ -78,8 +76,9 @@ public:
     double currentAltitude = 0.0; // 当前高度
     FlightState currentState = FlightState::CLIMBING;
 
-    // 定义一个管道输出流
-    std::ofstream dataPipe;
+    // 定义IPC服务端对象和客户端句柄
+    UnixSocketServer server;
+    int client_fd = -1;
 
     int shm_fd = -1;
     x_pilot::RobotState* shm_ptr = nullptr;
@@ -109,12 +108,38 @@ public:
         }
         LOG_INFO("共享内存挂载成功");
 
-        // 打开管道
-        dataPipe.open(PIPE_NAME);
-        if (!dataPipe.is_open()) {
-            LOG_ERROR("无法连接到管道");
+        // 启动IPC服务端
+        if (!server.bindAndListen("/tmp/x_pilot.ipc")) {
+            LOG_ERROR("IPC 服务端启动失败");
         } else {
-            LOG_INFO("数据链路已建立");
+            LOG_INFO("IPC 服务端已启动，等待连接...");
+            
+            while (!g_should_exit) {
+                fd_set read_fds;
+                FD_ZERO(&read_fds);
+                FD_SET(server.m_server_fd, &read_fds);
+
+                struct timeval timeout;
+                timeout.tv_sec = 1;
+                timeout.tv_usec = 0;
+
+                int ret = select(server.m_server_fd + 1, &read_fds, NULL, NULL, &timeout);
+
+                if (ret > 0) {
+                    if (FD_ISSET(server.m_server_fd, &read_fds)) {
+                        client_fd = server.accept();
+                        if (client_fd > 0) {
+                            LOG_INFO("IPC 客户端已连接");
+                            break; // 连接成功，跳出等待循环，进入业务循环
+                        }
+                    }
+                } else if (ret == 0) {
+                    continue;
+                } else {
+                    LOG_ERROR("Select 监听异常");
+                    break;
+                }
+            }
         }
 
         // 循环执行高度判断和飞行逻辑
@@ -159,12 +184,17 @@ private:
         LOG_INFO("巡航中…… 系统正常，高度为：" + std::to_string(currentAltitude) + "米");
     }
 
-    // 发送到管道的数据
+    // 发送到IPC的数据
     void sendTelemetry() {
-        if (dataPipe.is_open()) {
-            std::string msg = "ALT:" + std::to_string(currentAltitude);
-            // 写入管道，并加换行
-            dataPipe << msg << std::endl;
+        if (client_fd > 0) {
+            json j;
+            j["altitude"] = currentAltitude;
+            j["state"] = (currentState == FlightState::CLIMBING ? "CLIMBING" : "CRUISING");
+            
+            // 调用我们封装好的发送函数
+            if (!server.sendFrame(client_fd, j)) {
+                LOG_ERROR("IPC 数据发送失败");
+            }
         }
     }
 };
