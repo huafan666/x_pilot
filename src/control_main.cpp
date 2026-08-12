@@ -31,6 +31,8 @@ struct FlightConfig {
     double altitude;
     double latitude;
     double longitude;
+    std::string shm_path;
+    double speed;
 };
 
 // 读取无人机配置文件的JSON对象，然后返回FlightConfig对象
@@ -83,30 +85,34 @@ public:
     int shm_fd = -1;
     x_pilot::RobotState* shm_ptr = nullptr;
 
+    // 获取当前时间戳的辅助函数
+    uint64_t getTimestamp() {
+        using namespace std::chrono;
+        return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    }
+
     // 无限循环的飞控程序，防止退出
-    void runMission(double target) {
+    void runMission(double target, double speed, const std::string& shm_path) {
         LOG_INFO("任务开始，目标高度：" + std::to_string(target) + "米");
 
-        const char* shm_name = "/x_pilot_shm";
-
-        // 打开共享内存, 准备读取内容
-        shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+        // 共享内存初始化c
+        // 使用配置文件中的路径
+        shm_fd = shm_open(shm_path.c_str(), O_CREAT | O_RDWR, 0666);
         if (shm_fd == -1) {
             LOG_ERROR("共享内存创建失败");
             return;
         }
-
-        // 创建成功的话, 设置大小
         ftruncate(shm_fd, sizeof(x_pilot::RobotState));
-
-        // 映射到内存中
         shm_ptr = (x_pilot::RobotState*)mmap(NULL, sizeof(x_pilot::RobotState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
         if (shm_ptr == MAP_FAILED) {
             LOG_ERROR("共享内存映射失败");
             close(shm_fd);
             return;
         }
-        LOG_INFO("共享内存挂载成功");
+        LOG_INFO("共享内存挂载成功: " + shm_path);
+
+        // 初始化共享内存数据
+        shm_ptr->speed = speed;
 
         // 启动IPC服务端
         if (!server.bindAndListen("/tmp/x_pilot.ipc")) {
@@ -142,6 +148,9 @@ public:
             }
         }
 
+        // 计数器用于电量计算
+        int loop_counter = 0;
+
         // 循环执行高度判断和飞行逻辑
         while (!g_should_exit) {
             if (currentState == FlightState::CLIMBING) {
@@ -151,8 +160,26 @@ public:
                 performCruise();
             }
 
+            shm_ptr->timestamp = getTimestamp();
+
+            if (currentState == FlightState::CRUISING) {
+                shm_ptr->x += shm_ptr->speed * 0.1;
+
+                if (shm_ptr->is_spraying) {
+                    shm_ptr->sprayed_amount += shm_ptr->speed * 0.1;
+                }
+            }
+
+            loop_counter++;
+            if (loop_counter >= 10) {
+                loop_counter = 0;
+                if (shm_ptr->battary > 0) {
+                    shm_ptr->battary -= 0.1;
+                }
+            }
+
             // 休息时间，防止频率过高
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
 
@@ -208,13 +235,17 @@ int main() {
     signal(SIGINT, control_signal_handler);
     
     // 加载配置文件
-    FlightConfig myConfig = loadConfig();
+    std::ifstream sysConf("config/config.json");
+    json sys_j;
+    sysConf >> sys_j;
+    std::string shm_path = sys_j.value("shm_path", "/x_pilot_shm");
 
-    // 创建飞行控制器对象，并启动飞控
+    // 读取飞机配置 (拿任务参数)
+    FlightConfig myConfig = loadConfig(); // 这里的 loadConfig 保持读取 config_plane.json 不变
+
+    // 启动 (传入从 sysConf 拿到的路径)
     FlightController drone;
-
-    // 执行飞行任务
-    drone.runMission(myConfig.altitude);
+    drone.runMission(myConfig.altitude, myConfig.speed, shm_path);
     
     return 0;
 }
