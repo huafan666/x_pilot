@@ -8,6 +8,8 @@
 int main() {
     std::cout << "Plane View 启动中..." << std::endl;
 
+    sleep(2);
+
     const char* shm_name = "/x_pilot_shm";
     int shm_fd = -1;
     x_pilot::RobotState* shm_ptr = nullptr;

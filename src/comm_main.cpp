@@ -125,18 +125,19 @@ int main() {
                 if (events[i].events & EPOLLIN) {
                     json j;
                     if (tcp_client.recv(j)) {
-                        // 重置心跳计时器
                         tcp_client.onDataReceived();
                         // 收到地面站指令 -> 转发给 Control
-                        // 注意：这里如果 IPC 断开，发送会失败，我们在循环里会自动重连 IPC
                         if (ipc_client.m_sock_fd != -1) {
                             ipc_client.sendFrame(j); 
-                            // std::cout << "TCP->IPC: " << j.dump() << std::endl;
                         }
                     } else {
-                        // recv 返回 false，通常意味着连接断开
-                        tcp_client.onDisconnected();
-                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                        // recv 返回 false：可能是半包（正常），也可能断线
+                        // 用 socket 状态来判断：如果状态变成 DISCONNECTED 说明断线了
+                        if (tcp_client.getState() == TcpState::DISCONNECTED) {
+                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                        }
+                        // 如果不是 DISCONNECTED，说明只是半包，什么都不做，
+                        // 等 epoll 下次通知继续读
                     }
                 }
                 

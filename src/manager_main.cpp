@@ -75,11 +75,13 @@ int main() {
     };
 
     // 启动两个子进程(通信和控制)
-    ProcessInfo comm_info = {0, "comm_process", cfg.comm_process_path, 0, 0};
-    start_process(comm_info);
-
     ProcessInfo control_info = {0, "control_process", cfg.control_process_path, 0, 0};
     start_process(control_info);
+
+    sleep(2);
+    
+    ProcessInfo comm_info = {0, "comm_process", cfg.comm_process_path, 0, 0};
+    start_process(comm_info);
 
     if (!cfg.view_process_path.empty()) {
         ProcessInfo view_info = {0, "view_process", cfg.view_process_path, 0, 0};

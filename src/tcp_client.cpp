@@ -220,35 +220,83 @@ bool TcpClient::send(const json& j) {
     }
     return true;
 }
-
+// 从 socket 读原始数据到缓冲区，再尝试拆出一个完整包
 bool TcpClient::recv(json& out_json) {
     if (m_sock_fd == -1) return false;
 
-    uint32_t len_net;
-    ssize_t n = ::recv(m_sock_fd, &len_net, FRAME_HEADER_LEN, MSG_WAITALL);
-    if (n != FRAME_HEADER_LEN) {
-        if (n > 0) onDisconnected(); // 读到部分数据但不对
+    // 第一步：从 socket 读数据，追加到缓冲区
+    char tmp[4096];
+    while (true) {
+        ssize_t n = ::recv(m_sock_fd, tmp, sizeof(tmp), 0);
+        if (n > 0) {
+            m_recv_buffer.insert(m_recv_buffer.end(), tmp, tmp + n);
+            // 非阻塞模式，可能还有数据，继续读直到 EAGAIN
+        } else if (n == 0) {
+            // 对方关闭连接
+            onDisconnected();
+            return false;
+        } else {
+            // n < 0
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;  // 没有更多数据了，正常
+            } else if (errno == EINTR) {
+                continue;  // 被信号打断，重试
+            } else {
+                onDisconnected();
+                return false;  // 真正的错误
+            }
+        }
+    }
+
+    // 如果缓冲区是空的，说明这次 epoll 可读事件没读到东西
+    if (m_recv_buffer.empty()) {
         return false;
     }
 
-    uint32_t len = ntohl(len_net);
-    if (len > 1024 * 1024) { // 简单的安全检查
-        onDisconnected();
-        return false;
-    }
+    // 第二步：尝试从缓冲区拆出一个完整包
+    return parseBuffer(out_json);
+}
 
-    std::vector<char> buffer(len + 1);
-    n = ::recv(m_sock_fd, buffer.data(), len, MSG_WAITALL);
-    if (n != (ssize_t)len) {
-        onDisconnected();
-        return false;
-    }
+// 从缓冲区尝试拆出一个完整包（处理半包/粘包）
+bool TcpClient::parseBuffer(json& out_json) {
+    while (true) {
+        // 情况1：缓冲区连 4 字节头都不够 → 半包，等下次数据
+        if (m_recv_buffer.size() < FRAME_HEADER_LEN) {
+            return false;
+        }
 
-    buffer[len] = '\0';
-    try {
-        out_json = json::parse(buffer.data());
-        return true;
-    } catch (...) {
-        return false;
+        // 读出长度（网络字节序转主机字节序）
+        uint32_t body_len = ntohl(*reinterpret_cast<uint32_t*>(m_recv_buffer.data()));
+
+        // 安全检查：防止恶意超长包撑爆内存
+        if (body_len > 1024 * 1024) {
+            LOG_ERROR("收到超大帧长度: " + std::to_string(body_len) + "，断开连接");
+            onDisconnected();
+            return false;
+        }
+
+        // 情况2：头有了，但 body 还没收全 → 半包，等下次数据
+        size_t total_len = FRAME_HEADER_LEN + body_len;
+        if (m_recv_buffer.size() < total_len) {
+            return false;
+        }
+
+        // 情况3：头 + body 都齐了 → 拆出一个完整包
+        std::string body(m_recv_buffer.begin() + FRAME_HEADER_LEN,
+                         m_recv_buffer.begin() + total_len);
+
+        // 从缓冲区移除已消费的字节（处理粘包：后面可能还有下一个包）
+        m_recv_buffer.erase(m_recv_buffer.begin(),
+                            m_recv_buffer.begin() + total_len);
+
+        // 解析 JSON
+        try {
+            out_json = json::parse(body);
+            return true;  // 成功拆出一个包
+        } catch (const json::parse_error& e) {
+            LOG_ERROR("JSON 解析失败: " + std::string(e.what()));
+            // 解析失败，丢掉这个包，继续尝试拆下一个（while 循环）
+            continue;
+        }
     }
 }
