@@ -8,6 +8,7 @@
 #include <cstring>
 #include <time.h>
 #include "protocol.h"
+#include "metrics.h"
 
 #define FRAME_HEADER_LEN 4
 
@@ -83,6 +84,12 @@ void TcpClient::tryConnect() {
         m_state = TcpState::CONNECTED;
         m_backoff_seconds = 1; // 重置退避
         LOG_INFO("tcp连接成功至 " + m_ip + ":" + std::to_string(m_port));
+
+        // 埋点：TCP 连接成功
+        Metrics::emit("tcp_connect_success", {
+            {"server_ip", m_ip},
+            {"server_port", std::to_string(m_port)}
+        });
     } else if (errno == EINPROGRESS) {
         // 正在连接中（非阻塞模式正常返回）
         m_state = TcpState::CONNECTING;
@@ -106,6 +113,12 @@ void TcpClient::handleFail() {
     if (m_backoff_seconds > 60) m_backoff_seconds = 60;
 
     LOG_ERROR("tcp连接失败, 重新尝试 " + std::to_string(m_backoff_seconds) + "s");
+    // 埋点：TCP 连接失败
+    Metrics::emit("tcp_connect_fail", {
+        {"server_ip", m_ip},
+        {"server_port", std::to_string(m_port)},
+        {"backoff", std::to_string(m_backoff_seconds)}
+    });
 }
 
 // 当 epoll 监听到 socket 可写时，调用此函数确认是否真的连上了
@@ -173,6 +186,11 @@ void TcpClient::checkHeartbeatTimeout() {
     // 距离上次收到数据超过 5 秒 → 判定断线
     if (now - m_last_recv_time >= m_heartbeat_timeout) {
         LOG_WARN("心跳超时，服务器 " + m_ip + ":" + std::to_string(m_port) + " 无响应，判定断线");
+        // 埋点：心跳超时
+        Metrics::emit("heartbeat_timeout", {
+            {"server_ip", m_ip},
+            {"server_port", std::to_string(m_port)}
+        });
         onDisconnected();  // 复用已有的断线处理（会触发重连）
     }
 }

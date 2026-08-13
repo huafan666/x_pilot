@@ -1,0 +1,11 @@
+{
+  "server_ip": "127.0.0.1",                        
+  "server_port": 8888,
+  "comm_process_path": "./build/comm_process",
+  "control_process_path": "./build/control_process",
+  "view_process_path": "./build/view_process",
+  "log_level": "INFO",
+  "shm_path": "/x_pilot_shm",
+  "heartbeat_interval": 1,
+  "heartbeat_timeout": 5
+}

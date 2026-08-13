@@ -12,21 +12,24 @@
 #include "config.h"     // 配置加载器
 #include <sys/epoll.h>  // Epoll网络通信
 #include <json.hpp>
+#include "metrics.h"    // 数据埋点
 
 using json = nlohmann::json;
 
 // 定义全局退出的标记
 volatile sig_atomic_t g_should_exit = 0;
 
-// 信号处理函数：收到信号后，将 g_should_exit 设为 0，让循环停止
-void control_signal_handler(int signum) {
+// 信号处理函数：收到信号后，将 g_should_exit 设为 1，让循环停止
+void comm_signal_handler(int signum) {
     g_should_exit = 1;
 }
 
 int main() {
     // 注册信号处理函数，捕获 Manager 发来的 SIGTERM 和 Ctrl+C 的 SIGINT
-    signal(SIGTERM, control_signal_handler);
-    signal(SIGINT, control_signal_handler);
+    signal(SIGTERM, comm_signal_handler);
+    signal(SIGINT, comm_signal_handler);
+    // 忽略 SIGPIPE，防止写已断开的 socket 时被杀
+    signal(SIGPIPE, SIG_IGN);
     
     std::cout << "通信进程开始" << std::endl;
 

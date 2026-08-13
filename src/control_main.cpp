@@ -11,10 +11,12 @@
 #include <types.h>      // 数据类型
 #include <sys/mman.h>   // linux内存管理接口
 #include <fcntl.h>      // 控制文件
-#include <unistd.h>     
+#include <unistd.h>
 #include <csignal>      // 信号
 #include <ipc.h>        // IPC模块，通信
 #include "raii.h"
+#include "metrics.h"   // 数据埋点
+#include "config.h"    // 配置加载器
 
 using json = nlohmann::json;
 
@@ -174,7 +176,7 @@ public:
                 }
 
                 // 仿真逻辑结束
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         };
 
@@ -211,6 +213,13 @@ public:
         if (sim_thread.joinable()) {
             sim_thread.join();
         }
+
+        // 退出前清零运动状态，避免外部读到"还在喷洒"的脏数据
+        if (shm_ptr != nullptr) {
+            shm_ptr->is_spraying = false;
+            shm_ptr->speed = 0;
+        }
+
         LOG_INFO("系统已安全退出");
     }
 
@@ -229,10 +238,19 @@ public:
                 double new_speed = cmd_json["params"]["speed"];
                 shm_ptr->speed = new_speed; // 修改共享内存
                 LOG_INFO("指令执行：速度设置为 " + std::to_string(new_speed));
+                // 埋点：收到指令
+                Metrics::emit("command_received", {
+                    {"command_type", "SET_SPEED"},
+                    {"params", std::to_string(new_speed)}
+                });
             }
         } else if (cmd == "START_SPRAY") {
             shm_ptr->is_spraying = true; // 开始喷洒
             LOG_INFO("指令执行：开始喷洒");
+            // 埋点：收到指令
+            Metrics::emit("command_received", {
+                {"command_type", "START_SPRAY"}
+            });
         } else {
             LOG_WARN("收到未知指令：" + cmd);
         }
@@ -288,19 +306,19 @@ int main() {
     // 注册信号处理函数，捕获 Manager 发来的 SIGTERM 和 Ctrl+C 的 SIGINT
     signal(SIGTERM, control_signal_handler);
     signal(SIGINT, control_signal_handler);
-    
-    // 加载配置文件
-    std::ifstream sysConf("config/config.json");
-    json sys_j;
-    sysConf >> sys_j;
-    std::string shm_path = sys_j.value("shm_path", "/x_pilot_shm");
+    // 忽略 SIGPIPE，防止写已断开的 socket 时被杀
+    signal(SIGPIPE, SIG_IGN);
+
+    // 用 ConfigLoader 加载系统配置（有错误处理）
+    Config sysCfg = ConfigLoader::load("config/config.json");
+    std::string shm_path = sysCfg.shm_path;
 
     // 读取飞机配置 (拿任务参数)
-    FlightConfig myConfig = loadConfig(); // 这里的 loadConfig 保持读取 config_plane.json 不变
+    FlightConfig myConfig = loadConfig();
 
-    // 启动 (传入从 sysConf 拿到的路径)
+    // 启动
     FlightController drone;
     drone.runMission(myConfig.altitude, myConfig.speed, shm_path);
-    
+
     return 0;
 }

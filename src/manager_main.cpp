@@ -10,6 +10,7 @@
 #include <chrono>      // 时间库
 #include <thread>      // 线程休眠
 #include <ctime>       // 计时
+#include "metrics.h"   // 数据埋点
 
 // 定义结构体来储存子进程信息
 struct ProcessInfo {
@@ -20,9 +21,6 @@ struct ProcessInfo {
     time_t last_restart_time = 0;   // 记录上次重启的时间点
 };
 
-// 定义管道名字和位置
-#define PIPE_NAME "/tmp/x_pilot_pipe"
-
 // 定义全局退出的标记
 volatile sig_atomic_t g_should_exit = 0;
 
@@ -32,26 +30,23 @@ void signal_handler(int signum) {
 }
 
 int main() {
+    // 埋点：进程启动
+    Metrics::emit("process_start", {
+        {"process_name", "manager"},
+        {"pid", std::to_string(getpid())}
+    });
+
     // 捕获程序退出信号
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    // 忽略 SIGPIPE
+    signal(SIGPIPE, SIG_IGN);
 
     // 读取配置信息
     Config cfg = ConfigLoader::load("config/config.json");
 
     // 程序开始运行提示
     std::cout << "x_pilot 管理程序运行" << std::endl;
-
-    // 如果管道创建失败
-    if (mkfifo(PIPE_NAME, 0666) == -1) {
-        if (errno != EEXIST) {
-            perror("管道创建失败");
-            return 1;
-        }
-    }
-
-    // 如果管道创建成功
-    std::cout << "[Manager] 管道准备就绪: " << PIPE_NAME << std::endl;
 
     // 创建结构体放置进程说明
     std::vector<ProcessInfo> children;
@@ -116,6 +111,12 @@ int main() {
             if (found) {
                 std::cout << "检测到进程 " << dead_info.name << "PID: " << result << "意外退出" << std::endl;
                 LOG_ERROR("检测到进程挂掉, 尝试重启...");
+
+                // 埋点：子进程崩溃
+                Metrics::emit("process_crash", {
+                    {"process_name", dead_info.name},
+                    {"exit_code", std::to_string(status)}
+                });
 
                 time_t now = time(nullptr);
                 if ((now - dead_info.last_restart_time) < 10 && dead_info.restart_count >= 3) {

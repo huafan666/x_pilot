@@ -3,5 +3,5 @@ prd.md
 bin/
 build/
 log/
-config/
 .vscode
+test_temp_config.json

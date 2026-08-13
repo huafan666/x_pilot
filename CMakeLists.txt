@@ -23,7 +23,8 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 add_executable(manager 
     src/manager_main.cpp 
     src/utils.cpp
-    src/config.cpp      
+    src/config.cpp
+    src/metrics.cpp 
 )
 
 # 2. 通信进程 (重要修改：增加了 tcp_client.cpp 和 ipc.cpp)
@@ -34,6 +35,7 @@ add_executable(comm_process
     src/ipc.cpp           # 新增：Comm 需要连接 IPC
     src/tcp_client.cpp    # 新增：Comm 需要连接 TCP
     src/protocol.cpp
+    src/metrics.cpp
 )
 
 # 3. 控制进程
@@ -41,14 +43,15 @@ add_executable(control_process
     src/control_main.cpp 
     src/utils.cpp
     src/config.cpp
-    src/ipc.cpp      
+    src/ipc.cpp
+    src/metrics.cpp   
 )
 
 # 4. 数据可视进程
 add_executable(view_process 
     src/view_main.cpp 
     src/utils.cpp
-    src/config.cpp   
+    src/config.cpp
 )
 
 # 5. 测试客户端
@@ -66,6 +69,7 @@ add_library(xpilot_common STATIC
     src/utils.cpp
     src/config.cpp
     src/protocol.cpp
+    src/metrics.cpp
 )
 target_include_directories(xpilot_common PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
