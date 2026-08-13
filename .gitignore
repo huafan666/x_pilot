@@ -3,6 +3,5 @@ prd.md
 bin/
 build/
 log/
-include/
 config/
 .vscode

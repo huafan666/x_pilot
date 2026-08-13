@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <cstring>
 #include <time.h>
+#include "protocol.h"
 
 #define FRAME_HEADER_LEN 4
 
@@ -254,49 +255,5 @@ bool TcpClient::recv(json& out_json) {
     }
 
     // 第二步：尝试从缓冲区拆出一个完整包
-    return parseBuffer(out_json);
-}
-
-// 从缓冲区尝试拆出一个完整包（处理半包/粘包）
-bool TcpClient::parseBuffer(json& out_json) {
-    while (true) {
-        // 情况1：缓冲区连 4 字节头都不够 → 半包，等下次数据
-        if (m_recv_buffer.size() < FRAME_HEADER_LEN) {
-            return false;
-        }
-
-        // 读出长度（网络字节序转主机字节序）
-        uint32_t body_len = ntohl(*reinterpret_cast<uint32_t*>(m_recv_buffer.data()));
-
-        // 安全检查：防止恶意超长包撑爆内存
-        if (body_len > 1024 * 1024) {
-            LOG_ERROR("收到超大帧长度: " + std::to_string(body_len) + "，断开连接");
-            onDisconnected();
-            return false;
-        }
-
-        // 情况2：头有了，但 body 还没收全 → 半包，等下次数据
-        size_t total_len = FRAME_HEADER_LEN + body_len;
-        if (m_recv_buffer.size() < total_len) {
-            return false;
-        }
-
-        // 情况3：头 + body 都齐了 → 拆出一个完整包
-        std::string body(m_recv_buffer.begin() + FRAME_HEADER_LEN,
-                         m_recv_buffer.begin() + total_len);
-
-        // 从缓冲区移除已消费的字节（处理粘包：后面可能还有下一个包）
-        m_recv_buffer.erase(m_recv_buffer.begin(),
-                            m_recv_buffer.begin() + total_len);
-
-        // 解析 JSON
-        try {
-            out_json = json::parse(body);
-            return true;  // 成功拆出一个包
-        } catch (const json::parse_error& e) {
-            LOG_ERROR("JSON 解析失败: " + std::string(e.what()));
-            // 解析失败，丢掉这个包，继续尝试拆下一个（while 循环）
-            continue;
-        }
-    }
+    return parseFrame(m_recv_buffer, out_json);
 }
