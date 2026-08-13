@@ -14,6 +14,7 @@
 #include <unistd.h>     
 #include <csignal>      // 信号
 #include <ipc.h>        // IPC模块，通信
+#include "raii.h"
 
 using json = nlohmann::json;
 
@@ -83,7 +84,7 @@ public:
     UnixSocketServer server;
     int client_fd = -1;
 
-    int shm_fd = -1;
+    ScopedShm shm;
     x_pilot::RobotState* shm_ptr = nullptr;
 
     // 获取当前时间戳的辅助函数
@@ -97,26 +98,15 @@ public:
         // 打印目标
         LOG_INFO("任务开始，目标高度：" + std::to_string(target) + "米");
 
-        // 共享内存初始化c
-        // 使用配置文件中的路径
-        shm_fd = shm_open(shm_path.c_str(), O_CREAT | O_RDWR, 0666);
-        if (shm_fd == -1) {
-            LOG_ERROR("共享内存创建失败");
+                // 共享内存初始化（RAII，析构自动清理）
+        if (!shm.open(shm_path, sizeof(x_pilot::RobotState), false)) {
+            LOG_ERROR("共享内存创建/映射失败");
             return;
         }
-        ftruncate(shm_fd, sizeof(x_pilot::RobotState));
-        shm_ptr = (x_pilot::RobotState*)mmap(NULL, sizeof(x_pilot::RobotState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-        if (shm_ptr == MAP_FAILED) {
-            LOG_ERROR("共享内存映射失败");
-            close(shm_fd);
-            return;
-        }
+        shm_ptr = (x_pilot::RobotState*)shm.get();
         LOG_INFO("共享内存挂载成功: " + shm_path);
 
-        // 清零
         memset(shm_ptr, 0, sizeof(x_pilot::RobotState));
-
-        // 初始化共享内存数据
         shm_ptr->speed = speed;
 
         // IPC服务启动
